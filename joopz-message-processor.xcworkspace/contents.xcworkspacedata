@@ -4,4 +4,7 @@
    <FileRef
       location = "group:joopz-msg-processor.pl">
    </FileRef>
+   <FileRef
+      location = "group:email-test.pl">
+   </FileRef>
 </Workspace>
