@@ -223,12 +223,15 @@ sub send_message( $ ) {
     print "Email sent FROM: $mailfrom  TO: $mailto  MSG: $message\n";
 }
 
-#if ( $queue_count == 0 ) {
-#    print ("No msgs in queue.  Nothing to do.\n");
-#    exit;
-#}
+print "Joopz Redis Database Starting Up...\n";
+print "Queue[messages:outgoing]: $queue_count messages waiting in the queue\n";
 
-print "Found $queue_count messages in outgoing queue\n";
+while ( my ( $queue, $json_request ) = $client->brpop( 'messages:outgoing', 0 )) {
+    print ">>> Pulled new SMS request from $queue!\nRequest:\n" . Dumper( $json_request );
+    my $request = $json->decode( $json_request );
+    send_message( $request );
+    print "<<< Done with request: contactId=" . $request->{ contact_id } . " userId=" . $request->{ user_id } . " Msg: " . $request->{ message } . "\n";
+}
 
 #for ( my $i=0; $i < $queue_count; $i++ ) {
 #    my $record = $client->rpop( 'messages:outgoing' );
@@ -236,12 +239,13 @@ print "Found $queue_count messages in outgoing queue\n";
 #    print "Sending msg[$i]...\n";
 #    send_message( $entry );
 #}
-my $fake = {
-    user_id => 138836,
-    contact_id => 1306411,
-    message => "Fake hard-coded message for testing.",
-};
 
-send_message( $fake );
+#my $fake = {
+#    user_id => 138836,
+#    contact_id => 1306411,
+#    message => "Fake hard-coded message for testing.",
+#};
+
+#send_message( $fake );
 
 print "Done.\n";
