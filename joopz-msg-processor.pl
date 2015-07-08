@@ -94,6 +94,7 @@ sub get_carrier_gateway( $ ) {
     }
     
     print "get_carrier_gateway: returning SMTP gateway $gateway\n";
+    return $gateway;
 }
 
 sub get_carrier_from_nonported_phone_number( $ ) {
@@ -112,7 +113,7 @@ sub get_carrier_from_nonported_phone_number( $ ) {
         return '';
     }
     
-    return $carrier;
+    return lc $carrier;
 }
 
 sub get_carrier_from_phone_number( $ ) {
@@ -130,9 +131,12 @@ sub get_carrier_from_phone_number( $ ) {
     my $response = $ua->request($request);
     print "Response: STATUS " . $response->status_line . "\n";
     my $carrier = lc $response->decoded_content;
+    $carrier =~ s/^\n//g;
+    chomp($carrier);
+    
     print "Content: " . $carrier . "\n";
  
-    if ( $carrier == "Not ported" ) {
+    if ( $carrier eq "Not ported" ) {
         return get_carrier_from_nonported_phone_number($pn);
     }
     return $carrier;
@@ -169,11 +173,15 @@ sub send_message( $ ) {
     # Build destination email address
     print "Building MAIL TO address for phone: $destPhone\n";
     my $to_carrier = get_carrier_from_phone_number($destPhone);
-    print "   [" . $destPhone . "] => carrier = " . $to_carrier . "\n";
     my $smtphost = get_carrier_gateway($to_carrier);
-    print "   [" . $to_carrier . "] => SMTP host = " . $smtphost . "\n";
-    my $mailto = ( $destPhone =~ s/^1//g ) . '@' . $smtphost;
-    print "MAIL TO: " . $mailto . "\n";
+    print "[" . $destPhone . "] => [" . $to_carrier . "]: SMTP host " . $smtphost . "\n";
+    my $mailto = $destPhone . '@' . $smtphost;
+    print "MAILTO: $mailto\n";
+    if ( $mailto =~ s/^1//g ) {
+        print "Stripped leading 1: $mailto\n";
+    } else {
+        print "Nothing to strip: $mailto\n";
+    }
    
     # Build source email address
     # Get user/contact unique ID
@@ -182,14 +190,21 @@ sub send_message( $ ) {
     $rv = $sth->execute();
     my $contact = $sth->fetchrow_hashref();
     my $unique_id = $contact->{ uniq_id };
-    $query = qq(SELECT * FROM partners WHERE id=(SELECT parter_id FROM users WHERE phone_number='$destPhone'););
+    $query = qq(SELECT domain FROM partners WHERE id=(SELECT partner_id FROM users WHERE phone_number='$sourcePhone'););
     $sth = $postgres->prepare( $query );
     $rv = $sth->execute();
     my $partner = $sth->fetchrow_hashref();
     my $partnerDomain = $partner->{ domain };
-    print "[" . $destPhone . "] maps to partner " . $partnerDomain . "\n";
+    print "[" . $sourcePhone . "] maps to partner " . $partnerDomain . "\n";
+
+    my $mailfrom = $sourcePhone . "." . $unique_id . "@" . $partnerDomain;
     
-    my $mailfrom = ( $sourcePhone =~ s/^1//g ) . "." . $unique_id . "@" . $partnerDomain;
+    if ( $mailfrom =~ s/^1//g ) {
+        print "Stripped leading 1: $mailfrom\n";
+    } else {
+        print "Nothing to strip: $mailfrom\n";
+    }
+    
     print "MAIL FROM: " . $mailfrom . "\n";
     
     my $email = Email::MIME->create(
@@ -198,18 +213,14 @@ sub send_message( $ ) {
             To     => $mailto,
         ],
         attributes => {
-            encoding => "quoted_printable",
+            encoding => "quoted-printable",
             charset  => "ISO-8859-1",
         },
         body_str => $message . "\n" . "[Sent via joopz.com]\n", 
     );
     use Email::Sender::Simple qw(sendmail);
-    print "WOULD DO: sendmail($email):\n" . Dumper( $email ) . "\n";
-       
-    #$email->{ from } = $sourcePhone;
-    #$email->{ to } = $destPhone;
-    #$email->{ message } = $message;
-    
+    sendmail($email);
+    print "Email sent FROM: $mailfrom  TO: $mailto  MSG: $message\n";
 }
 
 #if ( $queue_count == 0 ) {
