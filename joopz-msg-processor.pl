@@ -12,6 +12,7 @@ use JSON::XS;
 use Data::Dumper;
 use Email::MIME;
 use HTTP::Request;
+use LWP::UserAgent;
 use DBI;
 
 my $dsn = "DBI:Pg:dbname=joopz;host=127.0.0.1;port=5432";
@@ -95,7 +96,7 @@ sub get_carrier_gateway( $ ) {
     print "get_carrier_gateway: returning SMTP gateway $gateway\n";
 }
 
-sub get_carrier_gateway_from_nonported_phone_number( $ ) {
+sub get_carrier_from_nonported_phone_number( $ ) {
     my $phone = shift;
     my $query = $NO_LNP_URL . $phone;
     my $request = HTTP::Request->new(GET => $query);
@@ -107,7 +108,7 @@ sub get_carrier_gateway_from_nonported_phone_number( $ ) {
     my $carrier = $response->decoded_content;
     print "Content: " . $carrier . "\n";
     
-    if ( $content == "NO" ) {
+    if ( $carrier == "NO" ) {
         return '';
     }
     
@@ -116,9 +117,9 @@ sub get_carrier_gateway_from_nonported_phone_number( $ ) {
 
 sub get_carrier_from_phone_number( $ ) {
     my $pn = shift;
-    print "get_carrier_gateway_from_phone_number: raw phone = $pn\n";
+    print "get_carrier_from_phone_number: raw phone = $pn\n";
     $pn =~ s/^1//g;
-    print "get_carrier_gateway_from_phone_number: processed phone = $pn\n";
+    print "get_carrier_from_phone_number: processed phone = $pn\n";
     
     
     my $query = $LNP_URL . $pn;
@@ -131,8 +132,8 @@ sub get_carrier_from_phone_number( $ ) {
     my $carrier = lc $response->decoded_content;
     print "Content: " . $carrier . "\n";
  
-    if ( $content == "Not ported" ) {
-        return get_carrier_gateway_from_nonported_phone_number($pn);
+    if ( $carrier == "Not ported" ) {
+        return get_carrier_from_nonported_phone_number($pn);
     }
     return $carrier;
 }
@@ -167,10 +168,10 @@ sub send_message( $ ) {
     # get required ingredients
     # Build destination email address
     print "Building MAIL TO address for phone: $destPhone\n";
-    my $to_carrier = get_carrier_gateway_from_phone_number($destPhone);
+    my $to_carrier = get_carrier_from_phone_number($destPhone);
     print "   [" . $destPhone . "] => carrier = " . $to_carrier . "\n";
     my $smtphost = get_carrier_gateway($to_carrier);
-    print "   [" . $toCarrier . "] => SMTP host = " . $smtphost . "\n";
+    print "   [" . $to_carrier . "] => SMTP host = " . $smtphost . "\n";
     my $mailto = ( $destPhone =~ s/^1//g ) . '@' . $smtphost;
     print "MAIL TO: " . $mailto . "\n";
    
@@ -202,7 +203,7 @@ sub send_message( $ ) {
         },
         body_str => $message . "\n" . "[Sent via joopz.com]\n", 
     );
-    Email::Sender::Simple qw(sendmail);
+    use Email::Sender::Simple qw(sendmail);
     print "WOULD DO: sendmail($email):\n" . Dumper( $email ) . "\n";
        
     #$email->{ from } = $sourcePhone;
@@ -211,10 +212,10 @@ sub send_message( $ ) {
     
 }
 
-if ( $queue_count == 0 ) {
-    print ("No msgs in queue.  Nothing to do.\n");
-    exit;
-}
+#if ( $queue_count == 0 ) {
+#    print ("No msgs in queue.  Nothing to do.\n");
+#    exit;
+#}
 
 print "Found $queue_count messages in outgoing queue\n";
 
