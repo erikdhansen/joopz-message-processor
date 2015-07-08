@@ -31,11 +31,11 @@ my $postgres = DBI->connect($dsn, "joopz", "joopz!") or die $DBI::errstr;
 my $queue_count = $client->llen( 'messages:outgoing' );
 
 
-sub get_carrier_gateway( $ ) {
-    my $carrier = shift;
-    print "Looking up SMTP gateway for carrier: $carrier\n";
-
-    my $id = 0;
+sub carrier_gw_map_static( $ ) {
+	my $carrier = shift;
+	print "Using static (hard-coded) carrier name to gateway ID mappings: $carrier\n";
+	
+	my $id = 0;
     
     if ( $carrier =~ /verizon/ ) {
         $id = 1;
@@ -81,10 +81,40 @@ sub get_carrier_gateway( $ ) {
         $id = 2;
     }
 
+	return $id
+}
+
+sub carrier_gw_map_postgres( $ ) {
+	my $carrier = shift;
+	print "Using PostgreSQL database (carrier table) for carrier to gateway mappings: $carrier\n";
+	
+	my $gatewayId = 0;
+	my $query = qq(SELECT * FROM carriers WHERE LOWER(name) like '%$carrier%';);
+	my $sth = $postgres->prepare( $query );
+	if ( $sth->execute < 0 ) {
+		print "Postgres DB Error! $DBI::errstr\n";
+		return $gatewayId;
+	}
+	my $row = $sth->fetchrow_hashref();
+	$gatewayId = $row->{ gateway_id };
+	return $gatewayId;
+}
+
+sub get_carrier_gateway( $ ) {
+    my $carrier = shift;
+    print "Looking up SMTP gateway for carrier: $carrier\n";
+
+	my $gwId = carrier_gw_map_static( $carrier );
+	print "carrier_gw_map_static(" . $carrier . ") => gatewayId : " . $gwId . "\n";
+	if( $gwId == 0 ) {
+		$gwId = carrier_gw_map_postgres( $carrier );
+		print "carrier_gw_map_static(" . $carrier . ") => gatewayId : " . $gwId . "\n";
+	}
+	
     my $gateway = "";
     
-    if ( $id > 0 ) {
-        my $query = qq(SELECT * FROM gateways WHERE id=$id;);
+    if ( $gwId > 0 ) {
+        my $query = qq(SELECT * FROM gateways WHERE id=$gwId;);
         my $sth = $postgres->prepare( $query );
         if ( $sth->execute() < 0 ) {
             print "Postgres DB Error: $DBI::errstr\n";
@@ -136,7 +166,7 @@ sub get_carrier_from_phone_number( $ ) {
     
     print "Content: " . $carrier . "\n";
  
-    if ( $carrier eq "Not ported" ) {
+    if ( $carrier eq "" || $carrier =~ /not ported/ ) {
         return get_carrier_from_nonported_phone_number($pn);
     }
     return $carrier;
@@ -174,6 +204,13 @@ sub send_message( $ ) {
     print "Building MAIL TO address for phone: $destPhone\n";
     my $to_carrier = get_carrier_from_phone_number($destPhone);
     my $smtphost = get_carrier_gateway($to_carrier);
+    
+    if ( $smtphost eq "" ) {
+		# Return from here and this message gets dropped and not sent
+		print "!!! FATAL Error !!!\nNo available SMTP gateway for carrier: $to_carrier\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n";
+		return;
+	}
+	
     print "[" . $destPhone . "] => [" . $to_carrier . "]: SMTP host " . $smtphost . "\n";
     my $mailto = $destPhone . '@' . $smtphost;
     print "MAILTO: $mailto\n";
