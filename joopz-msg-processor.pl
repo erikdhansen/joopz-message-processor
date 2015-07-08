@@ -172,6 +172,34 @@ sub get_carrier_from_phone_number( $ ) {
     return $carrier;
 }
 
+sub update_conversation( $$ ) {
+	my $userId = shift;
+	my $contactId = shift;
+	
+	my $query = qq(SELECT * FROM conversations WHERE user_id=$userId AND contact_id=$contactId;);
+	my $sth = $postgres->prepare( $query );
+	my $rv = $sth->execute();
+	
+	if( $rv < 0 ) {
+		print "Postgres DB Error Updating Conversation State! $DBI::errstr\n";
+	} else {
+		my $conversation = $sth->fetchrow_hashref();
+		my $conversationId = $conversation->{ id };
+		my $timestamp = time;
+		my $convo = {
+			conversation_id	=> $conversationId,
+			UserId => $userId,
+			ContactId => $contactId,
+			Timestamp => $timestamp,
+			Archived => "false",
+		};
+		
+		my $json_convo = $json->encode( $convo );
+		$client->lpush( 'conversations:updated', $json_convo );
+		print "Pushed conversation descriptor onto queue:\n" . Dumper( $json_convo ) . "\n";
+	}
+}
+
 sub send_message( $ ) {
     my $msg = shift;
     my $contact_id = $msg->{ 'contact_id' };
@@ -181,7 +209,7 @@ sub send_message( $ ) {
     
     my $query = qq(SELECT * FROM contacts WHERE id=$contact_id;);
     my $sth = $postgres->prepare( $query );
-    my $rv = $sth->execute() or die $DBI::errstr;
+    my $rv = $sth->execute();
     
     if ( $rv < 0 ) {
         print $DBI::errstr;
@@ -257,6 +285,9 @@ sub send_message( $ ) {
     );
     use Email::Sender::Simple qw(sendmail);
     sendmail($email);
+    
+    update_conversation( $user, $contact_id );
+    
     print "Email sent FROM: $mailfrom  TO: $mailto  MSG: $message\n";
 }
 
